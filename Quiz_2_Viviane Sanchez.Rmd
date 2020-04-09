@@ -1,17 +1,16 @@
 ---
-title: "AmesHousing"
+title: "AmesHousing com tidymodels"
 author: "Viviane Sanchez"
 date: "3/25/2020"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
 ```
 
-  
 ## 1. Introdução
-Será feita a modelagem da base Ames Housing com o pacote tidymodels e alguns dos pacotes apresentados em sala ao longo do curso Programa Avançado em Data Science do Insper (São Paulo, Brasil). Esse pacote padroniza o processamento dos dados e sua modelagem, facilitando a comparação entre os modelos e resultados.
+Será feita a modelagem da base [AmesHousing](https://github.com/topepo/AmesHousing) com o pacote tidymodels e alguns dos pacotes apresentados em aula ao longo do curso Programa Avançado em Data Science do Insper (São Paulo, Brasil).
 
 #### Objetivo: 
 Modelar uma previsão do preço de venda das casas com a maior acurácia possível da base AmesHousing.
@@ -34,24 +33,37 @@ library(vip)
 ```
 
 #### Dados
+Será carregada a base "make_ordinal_names", pois que nela algumas colunas já possuem fatores ordenados, o que facilitará a modelagem. Com skim, temos uma ideia do que há na base.
+
 ```{r}
 dados <- make_ordinal_ames()
 skim(dados)
 
+#?ames_raw
+```
+
+Aparentemente existe um valor faltando na coluna Electrical. Vamos carregar a base make_ames e verificar se esse valor está faltando também, novamnte com skim.
+
+```{r}
 dados2 <- make_ames()
 skim(dados2)
+```
 
+Pelo visto não há nenhum valor faltando nessa coluna. Vamos olhar mais de perto. Primeiro encontramos a linha com valor faltando na base original, e depois procuramos o valor dessa linha na nova base.
+
+```{r}
 row_na <- dados %>% 
   rowid_to_column() %>%
   filter(is.na(dados$Electrical)) %>% 
   select(rowid)
 
-dados2$Electrical[row_na$rowid]
+(dados$Electrical[row_na$rowid])
 
-#?ames_raw
+(dados2$Electrical[row_na$rowid])
+
 ```
 
-Como nas duas bases de dados não há a informação dessa coluna, vamos utilizar dropna()
+O valor é "Unknown", assim como na base ordenada. Como em ambas não há a informação de "Electrical" em apenas uma linha, vamos utilizar dropna() na base ordenada e seguir com a análise.
 
 ```{r}
 dados <- dados %>% 
@@ -62,27 +74,29 @@ skim(dados)
 
 ## 2. Análise Exploratória
 
+Para entender melhor o compartamento dos dados, será feita uma análise exploratória da base buscando relações com a variável predita "Sale_Price".
+
 ### 2.1. Distribuição dos preços
+
+Iniciamos a análise entendendo o perfil dessa variável:
 
 - Por região
 ```{r}
-
 dados %>%
   ggplot(aes(Longitude, Latitude, color = Sale_Price)) +
   geom_point(size = 0.5, alpha = 0.7) +
   scale_color_gradient(low = 'skyblue', high = 'darkred', labels = scales::label_number_si())
 
 ```
-É possível verificar uma concentração de casas mais caras principalmente no norte da região analisada. Provavelmente 'Neighborhood', assim como Latitude e Longitude, devem ter uma correlação alta com o preço.
+Verifica-se uma concentração de casas mais caras principalmente no norte da região analisada. Provavelmente 'Neighborhood' (bairro), assim como Latitude e Longitude, devem ter uma correlação alta com o preço.
 
 - Bairro
 ```{r}
 dados %>%
-  ggplot(aes(Longitude, Latitude, color = Neighborhood)) +
-  geom_point(size = 0.5, alpha = 0.7, show.legend = FALSE)
-
-  #scale_color_gradient(low = 'skyblue', high = 'darkred', labels = scales::label_number_si())
-
+  ggplot(aes(Neighborhood, Sale_Price, fill = Neighborhood)) +
+  geom_boxplot(show.legend = FALSE)+
+  scale_y_continuous(labels = scales::label_number_si())+
+  coord_flip()
 ```
 
 - Histograma
@@ -91,13 +105,15 @@ dados %>%
     ggplot(aes(x=Sale_Price)) +
     geom_histogram(fill="skyblue", binwidth = 10000) +
     scale_x_continuous(breaks= seq(0, 800000, by=100000), labels = scales::label_number_si())
-
+    
 (summary(dados$Sale_Price))
 ```
+
 No histograma observa-se uma concentração mais perto do começo da amostra. Isso é esperado, pois menos pessoas conseguem comprar casas mais caras. Importante notar que, apesar disso, a média e mediana são próximas.
 
 ### 2.2. Correlação entre variáveis numéricas
-Nesse item é possível ter uma ideia de quais serão os principais preditores, especialmente nos modelos lineares.
+Nesse item o objetivo é ter uma ideia de quais variáveis estão mais correlacionadas com "Sale_Price" para ter uma ideia do preditores e para nortear o restante da análise exploratória.
+
 ```{r}
  #variáveis numéricas
 num_vars <- which(sapply(dados, is.numeric))
@@ -116,36 +132,20 @@ dados[,corr_high] %>%
 
 ```
 
-A seguir serão analisadas as variáveis com maior correlação e algumas variáveis categóricas.
-
-### 2.3 Qualidade/Condição
-```{r}
-
-dados %>%
-  ggplot(aes(Overall_Qual, Sale_Price)) +
-  geom_boxplot()+
-  scale_y_continuous(labels = scales::label_number_si())
-```
-
-```{r}
-dados %>%
-  ggplot(aes(Overall_Cond, Sale_Price)) +
-  geom_boxplot()+
-  scale_y_continuous(labels = scales::label_number_si())
-
-```
-Apesar de estar na base como uma variável categórica, "Overall Quality" parace ter uma correlação alta com Sale_Price.
-
-### 2.4. Ano de construção, Área total e Material de construção
+### 2.3. Ano de construção, Área total e Material de construção
 ```{r}
 dados %>%
   ggplot(aes(Year_Built, Sale_Price, size = Lot_Area/1000,  color = Foundation)) +
   geom_point(alpha = 0.5)+
   scale_y_continuous(labels = scales::label_number_si())
 ```
-O mais marcante nesse gráfico é a mudança do material utilizado na estrutura das casas ao longo dos anos. A relação entre ano de construção e preço é também confirmada, visto que 'Year_Built ' é umas das variáveis nuµéricas com correlação maior do que 0.5.
+
+O mais marcante nesse gráfico é a mudança do material utilizado na estrutura das casas ao longo dos anos. A relação entre ano de construção e preço é também confirmada, visto que 'Year_Built' é umas das variáveis numéricas com correlação maior do que 0.5.
 
 ### 2.4. Garagem 
+
+No topo da lista de variáveis correlacionadas está a a área da garagem e quantidade de carros. Vamos observar o comportamento destas e outras variáveis relacionadas.
+
 ```{r}
 
 dados %>%
@@ -164,6 +164,8 @@ dados %>%
 
 ```
 
+Além das variáveis altamente correlacioanadas, há uma concentração do tipo de garagem em difenrentes níveis de preço. O tipo de acabamento, no entanto, parece não ter nenhuma relação significativa.
+
 ### 2.5. Área total, Lareiras e Condição de Venda
 ```{r}
 
@@ -174,16 +176,29 @@ dados %>%
 
 ```
 
-### 2.6. Misc Feature, Street
+Aqui apenas é confirmada a correlação da quantidade de lareiras e área comum. A condição de venda "Normal" predomina na amostra. 
+
+### 2.5 Qualidade/Condição
 ```{r}
+
 dados %>%
-  ggplot(aes(Misc_Feature, Sale_Price, fill = Street)) +
+  ggplot(aes(Overall_Qual, Sale_Price, fill = Street)) +
   geom_boxplot()+
   scale_y_continuous(labels = scales::label_number_si())
-  #scale_y(scales::label_number_si())
 ```
 
+```{r}
+dados %>%
+  ggplot(aes(Overall_Cond, Sale_Price, fill = Street)) +
+  geom_boxplot()+
+  scale_y_continuous(labels = scales::label_number_si())
+```
+
+Apesar de estar na base como uma variável categórica, "Overall Quality" parace ter uma correlação alta com Sale_Price.
+
 ## 3. Pré processamento
+
+Antes de alimentar os dados aos modelos, é necessário separar a base em treino e teste, e garantir que está em um formato interpretável para os algoritmos utilizados. O parâmetro "strata" divide a base proporcionalmente conforme a variável indicada.
 
 ### 3.1 Separação da base em treino e teste (treino/teste/total):
 
@@ -196,51 +211,61 @@ ames_test <- testing(ames_split)
 ```
 
 ### 3.2. Receita
-A interface do tidymodels permite a criação de uma receita para processar os dados antes do modelo. Isso facilita também o pré-processamento da base de teste ao final do relatório. Algumas variáveis já estão na base como fator, portanto não é necessário ordená-las. No entanto, é necessário incluir na receita um passo para converter a ordem em números: **step_ordinalscore**
+A interface do tidymodels permite a criação de uma receita com o pacote "recipes" para processar os dados antes do modelo. Isso facilita também o pré-processamento da base de teste ao final do relatório, pois aplica exatamente as mesmas modificações. Algumas variáveis já estão na base como fator, portanto não é necessário ordená-las. No entanto, é necessário incluir na receita um passo para converter a ordem em números: **step_ordinalscore**
 
+A seguir as variáveis ordenadas:
 ```{r}
-
 ord_vars <- vapply(dados, is.ordered, logical(1))
 
 (ordered <-names(ord_vars)[ord_vars])
-
 ```
 
-Como algumas colunas possuem muitas categorias, as que possuem mais de 10 serão reduzidas com **"step_other"**. Após isso, cria-se variáveis dummy para todas as categorias (**step_dummy**), remove-se as variáveis com apenas um valor (**step_vz**) e normaliza-se a base (**step_normalize**).
+Como algumas colunas possuem muitas categorias, as que possuem mais de 10 serão reduzidas com **"step_other"** (10 é o número de classificações atribuídas nas colunas que avaliam a qualidade). Após isso, cria-se variáveis dummy para as demais categorias (**step_dummy**), remove-se as variáveis com apenas um valor (**step_vz**) e normaliza-se a base (**step_normalize**).
 
 ```{r}
-(ames_rec <- recipe(Sale_Price ~ ., data = ames_train) %>% 
+(ames_rec <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  #step_log(Sale_Price)) %>% 
   step_other(MS_SubClass, Neighborhood, Exterior_1st, Exterior_2nd, threshold = 0.02) %>% 
   step_ordinalscore(ordered) %>%
   step_dummy(all_nominal(), -all_outcomes()) %>%
-  step_zv(all_numeric()) %>% 
+  step_zv(all_predictors()) %>% 
   step_normalize(all_numeric()) %>% 
   prep())
-
-#ames_prep <- prep(ames_rec)
-train_baked  <- juice(ames_rec) #base de treino pronta para o modelo
-#juice é um caso específico da função bake 
-
-test_baked <- bake(ames_rec, new_data = ames_test) #base de teste processada
 ```
 
-Para poder modelar adequadamente aplica-se cross validation na base de treino. Além disso, serão criadas amostras bootstrap para ajuste dos hiperparâmetros de alguns dos modelos utilizados.
+A receita pronta é então aplicada nas bases de treino e teste com a função "bake". Para a base teste, pode-se utilizar juice, que é um caso especial de bake.
+
+```{r}
+
+train_baked  <- juice(ames_rec) 
+
+test_baked <- bake(ames_rec, new_data = ames_test)
+
+```
+
+A seguir uma ideia de como ficou a base processada:
+```{r}
+glimpse(train_baked)
+```
+
+
+Aplica-se então cross validation na base de treino. Além disso, serão criadas amostras bootstrap para ajuste dos hiperparâmetros de alguns dos modelos utilizados.
 
 ```{r}
 set.seed(123)
 (cv_splits <- vfold_cv(train_baked, v = 5, strata = Sale_Price))
 
 set.seed(123)
-(ames_boot <- bootstraps(train_baked, times = 25, strata = Sale_Price)) #mesmo número de amostras gerado por cross-validation
-
+(ames_boot <- bootstraps(train_baked, times = 10, strata = Sale_Price))
 ```
 
 ## 4. Modelos
+
 Antes de ajustar os modelos, é necessário especificar o pacote usado, modo e parâmetros. Depois disso, é feita a modelagem nos diferentes folds criados por cross validation para avaliar seu desempenho.
 
 ### 4.1. Regressão Linear
 
-Inicialmente sem seleção stepwise.
+#### 4.1.1. Sem seleção stepwise
 
 ```{r lm_fit}
 lm_spec <- linear_reg() %>% 
@@ -252,54 +277,69 @@ lm_res <- fit_resamples(Sale_Price ~ .,
                cv_splits,
                control = control_resamples(save_pred = TRUE))
 
+```
+
+Resumo do modelo ajustado:
+```{r}
 (lm_res %>% 
   collect_metrics())
+```
 
+Modelo ajustado na base completa, resumo e importância das variáveis:
+```{r}
 lm_fit <- lm_spec %>% 
       fit(Sale_Price ~.,
       data = train_baked)
 
+lm_fit %>% 
+  summary()
+
+lm_fit %>% 
+  tidy()
 ```
-Stepwise - Backward
+
+#### 4.1.2 Com seleção stepwise backward
+O pacote tidymodels não possui uma integração pronta com o pacote leaps para realizar stepwise selection. Devido a isso, o procedimento será feito, mas o modelo não será considerado na avaliação final. É possível criar essa integração pelo pacote parsnip.
 
 ```{r}
- # Modelo linear + backward ----- 
+library(leaps)
+
 stepb <- regsubsets(Sale_Price ~ ., data = train_baked, nvmax = 10, 
                           method = "backward")
-#resumo
+
   resumo_stepb <- summary(stepb)
   resumo_stepb$outmat
+  
+  coef(stepb, id = which.min(resumo_stepb$bic))
 
   plot(stepb, scale = "adjr2")
-          
+  
+  summary(stepb)
 ```
 
 
 ### 4.2. Lasso
+Nesse modelo, é utilizada a função tune() para encontrar o melhor lambda (penalty) nas amostras bootstrap. 
 
-Nesse modelo, é utilizada a função tune() para encontrar o melhor lambda. 
-Inicialmente, será utilizada a base de treino completa e o modelo final ajustado com cross validation.
-
-```{r lasso_tune}
-lasso_tune_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
+```{r}
+lasso_spec <- linear_reg(penalty = tune(), mixture = 1) %>%
   set_engine("glmnet", standardize = FALSE) #false, pois a base já foi pré-processada anteriormente 
 
 lambda_grid <- grid_regular(penalty(), levels = 500)
 
 doParallel::registerDoParallel() #processamento em paralelo para otimizar
 
-set.seed(2020)
+set.seed(123)
 lasso_grid <- tune_grid(Sale_Price ~.,
-  model = lasso_tune_spec,
+  model = lasso_spec,
   resamples = ames_boot,
-  grid = lambda_grid
-)
+  grid = lambda_grid)
 
 ```
 
-Avaliação dos parâmetros - lambda para o menor eqm (rmse):
+Avaliação dos parâmetros - lambda para o menor erro quadrado médio (rmse):
 
-```{r lasso_best}
+```{r}
 lasso_grid %>%
   collect_metrics()
 
@@ -314,41 +354,36 @@ lasso_grid %>%
   ) +
   geom_line(size = 1.5) +
   facet_wrap(~.metric, scales = "free", nrow = 2) +
-  #scale_x_continuous(expand = c(0, 0)) +
   scale_x_log10() +
   labs(x = 'Log(lambda)') +
   theme(legend.position = "none")
 
-(lowest_rmse <- lasso_grid %>%
+(lasso_lowest_rmse <- lasso_grid %>%
   select_best("rmse", maximize = FALSE))
 
 ```
 
 Modelo Lasso final:
-```{r lasso_fit}
-
-lasso_final_spec <- linear_reg(penalty = lowest_rmse$penalty , mixture = 1) %>%
-  set_engine("glmnet", standardize = FALSE, nlambda = 100)
-
-?set_engine
+O pacote tidymodels permite finalizar o modelo com o melhor parâmetro encontrado. Após isso, o modelo é aplicado nas amostras criadas com cross-validatione também ajustada na base de treino completa.
+```{r}
+lasso_final <- lasso_spec %>% 
+  finalize_model(parameters = lasso_lowest_rmse)
 
 lasso_res <- fit_resamples(Sale_Price ~ .,
-               lasso_final_spec,
+               lasso_final,
                cv_splits,
                control = control_resamples(save_pred = TRUE))
     
 (lasso_res %>% 
   collect_metrics())
 
-lasso_fit <- lasso_final_spec %>% 
+lasso_fit <- lasso_final %>% 
       fit(Sale_Price ~.,
       data = train_baked)
 ```
 
-Infelizmente, essa forma não permite a visualização das variáveis pela biblioteca plotmo, pois a variação do lambda não fica registrada.
-
-Importância das variáveis:
-```{r lasso_var}
+Infelizmente essa forma de ajustar os modelos não permite a visualização das variáveis pela biblioteca plotmo, pois a classe criada pelo tidymodels não é reconhecida. É possível, no entanto, montar o gráfico, mas nesse caso específico, devido à quantidade de variáveis, a visualização fica prejudicada.
+```{r}
 
 library(plotmo)
 #plot(lasso_fit, xvar = 'lambda', label = FALSE)
@@ -358,38 +393,52 @@ library(plotmo)
 ### Fazer fit na base inteira
 plot_glmnet(lasso_fit)
 
+
+lasso_fit %>% 
+  tidy %>% 
+  #filter(step <=100) %>% 
+  #filter(estimate < 0.2) %>% 
+  ggplot(aes(lambda, estimate, color = term))+
+  geom_line(show.legend = FALSE)
+
+```
+
+Será utilizado, portanto, o pacote vip, que possui funcionalidades semelhantes e permite identificar as variáveis mais importantes no modelo.
+
+```{r}
 #plot(lasso.coef[lasso.coef != 0])
-var <- lasso_fit %>%
+lasso_var <- lasso_fit %>%
   vi(lambda = lowest_rmse$penalty) %>% 
   mutate(Importance_pct = abs(Importance)/max(abs(Importance))) %>% 
   mutate(Variable = fct_reorder(Variable, Importance_pct))
 
 #Verificaçãoda seleção das variáveis
-var %>% 
+lasso_var %>% 
   count(Importance_pct != 0)
 
 #variáveis que mais impactam no preço  
-var %>% 
-  filter(Importance_pct > 0.2) %>% 
+lasso_var %>% 
+  filter(Importance_pct > 0.05) %>% 
   ggplot(aes(Variable,Importance_pct, fill = Sign)) +
   geom_col()+
   scale_y_continuous(labels = scales::percent_format())+
   coord_flip()
 
 #variáveis que impactam negativamente no preço
-var %>% 
-  filter(Importance < 0) %>% 
-  ggplot(aes(Variable,Importance_pct, fill = Sign)) +
-  geom_col()+
-  scale_y_continuous(labels = scales::percent_format())+
-  coord_flip()
+#lasso_var %>% 
+#  filter(Importance < 0) %>% 
+#  ggplot(aes(Variable,Importance_pct, fill = Sign)) +
+#  geom_col()+
+#  scale_y_continuous(labels = scales::percent_format())+
+#  coord_flip()
 
 ```
 
 ### 4.3. Ridge Regression
+Assim, como no Lasso, o lambda será otimizado. 
 
-```{r ridge_tune}
-ridge_tune_spec <- linear_reg(penalty = tune(), mixture = 0) %>% #mixture = 0 para ridge regression
+```{r}
+ridge_spec <- linear_reg(penalty = tune(), mixture = 0) %>% #mixture = 0 para ridge regression
   set_engine("glmnet", standardize = FALSE)
 
 ridge_lambda_grid <- grid_regular(penalty(), levels = 1000)
@@ -398,14 +447,14 @@ doParallel::registerDoParallel() #processamento em paralelo para otimizar
 
 set.seed(2020)
 ridge_grid <- tune_grid(Sale_Price ~.,
-  model = ridge_tune_spec,
+  model = ridge_spec,
   resamples = ames_boot,
   grid = ridge_lambda_grid
 )
 
 ```
 
-```{r ridge_best}
+```{r}
 
 ridge_grid %>%
   collect_metrics()
@@ -429,30 +478,38 @@ ridge_grid %>%
 
 ```
 
-Modelo Final
+Modelo Final:
 
-```{r ridge_fit}
+```{r}
 
-ridge_final_spec <- linear_reg(penalty = ridge_lowest_rmse$penalty , mixture = 0) %>%
-  set_engine("glmnet", standardize = FALSE)
+ridge_final <- ridge_spec %>% 
+  finalize_model(parameters = ridge_lowest_rmse)
 
 ridge_res <- fit_resamples(Sale_Price ~ .,
-               ridge_final_spec,
+               ridge_final,
                cv_splits,
                control = control_resamples(save_pred = TRUE))
 
 (ridge_res %>% 
   collect_metrics())
 
-ridge_fit <- ridge_final_spec %>% 
+ridge_fit <- ridge_final %>% 
       fit(Sale_Price ~.,
       data = train_baked)
 
+ridge_fit %>% 
+  summary
+
+ridge_fit %>% 
+  tidy %>% 
+  #filter(step <=100) %>% 
+  #filter(estimate < 0.2) %>% 
+  ggplot(aes(lambda, estimate, color = term))+
+  geom_line(show.legend = FALSE)
 ```
 
 
-```{r ridge_var}
-
+```{r}
 #plot(lasso.coef[lasso.coef != 0])
 var_ridge <- ridge_fit %>%
   vi(lambda = ridge_lowest_rmse$penalty) %>% 
@@ -468,62 +525,64 @@ var_ridge %>%
   coord_flip()
 
 #variáveis que impactam negativamente no preço
-var %>% 
-  filter(Importance < 0) %>% 
-  ggplot(aes(Variable,Importance_pct, fill = Sign)) +
-  geom_col()+
-  scale_y_continuous(labels = scales::percent_format())+
-  coord_flip()
+#var_ridge %>% 
+#  filter(Importance < 0) %>% 
+#  ggplot(aes(Variable,Importance_pct, fill = Sign)) +
+#  geom_col()+
+#  scale_y_continuous(labels = scales::percent_format())+
+#  coord_flip()
 
 ```
 
 ### 4.4. Bagging
 
-#### Método convencional:
+Assim  como a seleção stepwise, também não há uma função específica no tidymodels para bagging. Seria possível através do crescimento de várias árvores, mas para simplificar, será utilizado o pacote ipred que realiza esse procedimento muito mais rápido. 
 
 ```{r}
 library(ipred)
+
 set.seed(123)
 (bag_fit <- ipred::bagging(Sale_Price ~ ., data = train_baked, coob = TRUE))
 
+
 #função para calcular o eqm
-        f_eqm <- function(model, y = train_baked$Sale_Price){
-          sum((y - round(model))^2) / length(model)
+f_eqm <- function(model, y = train_baked$Sale_Price){
+          sum((y - round(model$y))^2) / length(model$y)
         }
 
-f_eqm(bag_fit)
+bag_rmse <- f_eqm(bag_fit)
 
 ```
 
-
 ### 4.5. Random Forest
-Encontrando o melhor mtry
+
+Aqui será feita a otimização do parâmetro mtry e o número de árvores. Para otimizar o processamento, iniciaremos com um grid apenas para o mtry, para depois testar o número de árvores.
 ```{r}
 
+p <- ncol(train_baked) - 1 #total de variáveis preditoras
+
 rf_tune_spec <- rand_forest(mode = "regression",
-                            mtry = 71,#tune(), #p/3, p = 80
+                            mtry = tune(), #p/3 = 189
                             trees = 500) %>% 
-                            #min_n = tune()) %>%
                 set_engine("ranger", importance = "permutation")
 
-?set_engine
 
-#(rf_grid <- grid_regular(
- # mtry(range = c(6, 200)),
-  #trees(range = c(500, 1000)),
-  #levels = 10))
+(rf_grid <- grid_regular(
+  mtry(range = c(p/4, 100)),
+  #trees(range = c(500, 2000)),
+  levels = 4))
 
 doParallel::registerDoParallel() #processamento em paralelo para otimizar
 
 set.seed(2020)
 rf_tune <- tune_grid(Sale_Price ~.,
                       model = rf_tune_spec,
-                      resamples = ames_boot)
+                      resamples = ames_boot,
+                      grid = rf_grid)
 
 ```
 
 Avaliando os resultados:
-
 ```{r}
 
 rf_tune %>% 
@@ -547,50 +606,54 @@ rf_lowest_rmse <- rf_tune %>%
 
 ```
 
+Observa-se que mtry ótimo está perto de 50. Em outras rodadas, ficou evidente que o ótimo está nessa região. Acima disso, o modelo provavelmente está overfitting. Com o melhor mtry, vamos avaliar o erro considerando o número de árvores.
 
-Melhor número de árvores
+- Melhor número de árvores
 ```{r}
 
-rf_tune_spec <- rand_forest(mode = "regression",
-                            mtry = tune(), #p/3, p = 80
+rf_spec <- rand_forest(mode = "regression",
+                            mtry = 47,
                             trees = tune()) %>% 
-                            #min_n = tune()) %>%
-                set_engine("ranger", importance = TRUE)
+                set_engine("ranger", importance = "permutation")
 
-(rf_grid <- grid_regular(
-  mtry(range = c(60, 90)),
-  trees(range = c(500, 1000)),
-  levels = 3))
 
+rf_grid <- grid_regular(
+  #mtry(range = c(p/3,100)),
+  trees(range = c(500, 2000)),
+  levels = 4)
+
+doParallel::registerDoParallel()
 
 set.seed(2020)
 rf_tune <- tune_grid(Sale_Price ~.,
-                      model = rf_tune_spec,
+                      model = rf_spec,
                       resamples = ames_boot,
                       grid = rf_grid)
 
 rf_tune %>% 
   collect_metrics()
 
-rf_tune%>%
+
+rf_tune %>%
   collect_metrics() %>%
-  select(mean, mtry,trees, .metric) %>%
+  select(mean, trees, .metric) %>%
   filter(.metric == 'rmse') %>% 
-  pivot_longer(min_n:mtry,
-    values_to = "value",
-    names_to = "parameter") %>%
-  ggplot(aes(value, mean, color = parameter)) +
-  geom_point(show.legend = TRUE) +
-  facet_wrap(~parameter, scales = "free_x") +
-  labs(x = NULL, y = "Value")
+  #pivot_longer(min_n:mtry,
+  #  values_to = "value",
+  #  names_to = "parameter") %>%
+  ggplot(aes(trees, mean, color = .metric)) +
+  geom_point(show.legend = TRUE)
+
+  
+  rf_lowest_rmse <- rf_tune %>%
+    select_best("rmse", maximize = FALSE)
 
 ```
 
 
-Modelo Final
-
+- Modelo Final:
 ```{r rf_fit}
-rf_final <-  rf_tune_spec %>%
+rf_final <-  rf_spec %>%
     finalize_model(parameters = rf_lowest_rmse)
 
 
@@ -599,24 +662,18 @@ rf_res <- fit_resamples(Sale_Price ~ .,
                cv_splits,
                control = control_resamples(save_pred = TRUE))
 
-rf_res %>% 
-  unnest(.notes)
 
 rf_fit <- rf_final %>% 
       fit(Sale_Price ~.,
       data = train_baked)
 
-#rf_fit %>% 
-#  collect_metrics()
+rf_fit %>% 
+  summary
 
 ```
 
 Importância das variáveis
 ```{r rf_var}
-
-#rf_res %>%
- # vip(geom = "point")
-
 
 vi(rf_fit) %>% 
   mutate(Importance_pct = abs(Importance)/max(abs(Importance))) %>% 
@@ -626,10 +683,13 @@ vi(rf_fit) %>%
   geom_point()+
   scale_y_continuous(labels = scales::percent_format())+
   coord_flip()
+
 ```
 
 
 ## 5. Comparação dos Modelos
+
+No gráfico abaixo, é possível observar o erro médio quadrado e o R2 para cada dos modelos, exceto para bagging, que foi ajustado diretamente na base completa.
 
 ```{r}
 lm_res %>% 
@@ -659,66 +719,79 @@ lm_res %>%
 
 ```
 
-Comparação das métricas
+
+Para ter uma ideia melhor, a seguir a comparação das métricas nas bases de treino e teste completas.
+
 ```{r}
+results_train <- lm_fit %>% 
+  predict(new_data = train_baked) %>% 
+  mutate(truth = train_baked$Sale_Price,
+         model = 'lm') %>% 
+  bind_rows(lasso_fit %>% 
+  predict(new_data = train_baked) %>% 
+  mutate(truth = train_baked$Sale_Price,
+         model = 'lasso')) %>%
+  bind_rows(ridge_fit %>% 
+  predict(new_data = train_baked) %>% 
+  mutate(truth = train_baked$Sale_Price,
+         model = 'ridge')) %>%
+  bind_rows(tibble(.pred = predict(bag_fit, newdata = train_baked),
+                    truth = train_baked$Sale_Price,
+                    model = 'bagging')) %>% 
+  bind_rows(rf_fit %>% 
+  predict(new_data = train_baked) %>% 
+  mutate(truth = train_baked$Sale_Price,
+         model = 'random forest'))
 
-lm <- lm_res %>% 
-  collect_metrics()
-  #filter(.metric == 'rmse')
-
-lasso <- lasso_res %>% 
-  collect_metrics()
-
-ridge <- ridge_res %>% 
-  collect_metrics()
-
-ba <- bag_res %>% 
-  collect_metrics()
-
-rf <- rf_res %>% 
-  collect_metrics()
-  
-```
-
-Predcit na base teste:
-```{r}
-
-
-```
-
-Resultados
-```{r}
-
-resultados <- tibble( modelo = c('lm','lasso','ridge','bagging', 'rf'),
-                      rmse_treino = NA,
-                      rmse_teste = NA)
-
+results_train %>% 
+  group_by(model) %>% 
+  rmse(truth = truth, estimate = .pred)
 
 ```
 
-Mapa predict vs original: (ajustar)
+Pela base de treino, observa-se que o melhor modelo foi **random forest**, seguido por bagging.
+Para confirmar, vamos observar o comportamento na base teste:
+
 ```{r}
-final_res %>%
-  collect_predictions() %>%
-  mutate(correct = case_when(
-    legal_status == .pred_class ~ "Correct",
-    TRUE ~ "Incorrect"
-  )) %>%
-  bind_cols(trees_test) %>%
-  ggplot(aes(longitude, latitude, color = correct)) +
-  geom_point(size = 0.5, alpha = 0.5) +
-  labs(color = NULL) +
-  scale_color_manual(values = c("gray80", "darkred"))
+
+results_test <- lm_fit %>% 
+  predict(new_data = test_baked) %>% 
+  mutate(truth = test_baked$Sale_Price,
+         model = 'lm') %>% 
+  bind_rows(lasso_fit %>% 
+  predict(new_data = test_baked) %>% 
+  mutate(truth = test_baked$Sale_Price,
+         model = 'lasso')) %>%
+  bind_rows(ridge_fit %>% 
+  predict(new_data = test_baked) %>% 
+  mutate(truth = test_baked$Sale_Price,
+         model = 'ridge')) %>%
+  bind_rows(tibble(.pred = predict(bag_fit, newdata = test_baked),
+                    truth = test_baked$Sale_Price,
+                    model = 'bagging')) %>% 
+  bind_rows(rf_fit %>% 
+  predict(new_data = test_baked) %>% 
+  mutate(truth = test_baked$Sale_Price,
+         model = 'random forest'))
+
+results_test %>% 
+  group_by(model) %>% 
+  rmse(truth = truth, estimate = .pred)
+
 ```
 
+Na base de teste, tivemos o mesmo resultado: o modelo que melhor performou foi **random forest**. No entanto, o segundo melhor modelo foi a regressão linear, que teve a pior performance na base de treino. Ridge e Lasso performaram de forma semelhante nas duas bases.
 
+### 6. Conclusão
+Conforme avaliado na análise exploratória, as principais variáveis preditoras foram as mais correlacionadas. Isso explica também o alto desempenho do modelo linear. O pacote tidymodels otimiza o processo de execução e comparação dos modelos, mesmo não possuindo todos os utilizados nesse relatório.
+Observando individualmente, o ajuste com Lasso foi o que fez menos sentido em relação às variáveis selecionadas. A floresta aleatória foi o modelo que melhor performou, tanto na base treino, como na base teste. Além disso, as variáveis preditoras mais importantes foram as que apresentaram maior correlação linear, conforme visto na análise exploratória.
 
-### 6. Referências
+### 7. Referências
 Como referências para o desenvolvimento do relatório foram utilizadas as seguintes fontes:
 
-- An Introduction do Statistical Modelling - 
+- [An Introduction do Statistical Modelling - James, G. et. al.](http://faculty.marshall.usc.edu/gareth-james/ISL/ISLR%20Seventh%20Printing.pdf) 
 - Material de aula do curso Modelos Preditivos - Insper - 2020
-- [Introdução a Tidymodels - Tiago Mendonça](https://www.tiagoms.com/post/tidymodels/)
+- [Introdução a Tidymodels - Mendonça, T.](https://www.tiagoms.com/post/tidymodels/)
 - Julia Silge - [youtube](https://www.youtube.com/channel/UCTTBgWyJl2HrrhQOOc710kA)
     [Bootstrap resampling with #TidyTuesday beer production data](https://juliasilge.com/blog/beer-production/)
     [Preprocessing and resampling using #TidyTuesday college data](https://juliasilge.com/blog/tuition-resampling/)
@@ -732,6 +805,5 @@ Como referências para o desenvolvimento do relatório foram utilizadas as segui
   [House Prices: Glmnet, XGBoost, and SVM Using tidymodels](https://www.kaggle.com/hansjoerg/glmnet-xgboost-and-svm-using-tidymodels/comments#729954)
   [House prices: Lasso, XGBoost, and a detailed EDA](https://www.kaggle.com/erikbruin/house-prices-lasso-xgboost-and-a-detailed-eda)
 - [Hands on Machine Learning with R](https://bradleyboehmke.github.io/HOML/bagging.html)
-- [strapgod](https://github.com/DavisVaughan/strapgod)
 
   
