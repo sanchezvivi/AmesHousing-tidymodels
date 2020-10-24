@@ -3,11 +3,13 @@ title: "AmesHousing com tidymodels"
 author: "Viviane Sanchez"
 date: "4/9/2020"
 output:
-  html_document: default
+  html_document: github_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+
+#rmarkdown::render("AmesHousing with Tidymodels.Rmd", envir=.GlobalEnv) 
 ```
 
 ## 1. Introdução
@@ -272,6 +274,7 @@ lm_spec <- linear_reg() %>%
   set_engine('lm')
 
 #fit nos cv folds
+doParallel::registerDoParallel(cores = 5)
 lm_res <- fit_resamples(Sale_Price ~ .,
                lm_spec,
                cv_splits,
@@ -602,11 +605,11 @@ rf_tune_spec <- rand_forest(mode = "regression",
 
 
 (rf_grid <- grid_regular(
-  mtry(range = c(p/5, 100)),
+  mtry(range = c(38, 100)),
   #trees(range = c(500, 2000)),
   levels = 5))
 
-doParallel::registerDoParallel() #processamento em paralelo para otimizar
+doParallel::registerDoParallel(cores = 6) #processamento em paralelo para otimizar
 
 set.seed(2020)
 rf_tune <- tune_grid(Sale_Price ~.,
